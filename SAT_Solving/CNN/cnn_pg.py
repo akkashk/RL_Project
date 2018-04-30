@@ -611,7 +611,9 @@ def actor_critic(filepaths, epochs, numVars, estimator_policy, estimator_value, 
     rewards_received = []
     
     for epoch in range(epochs):
-        
+       
+        print(epoch)
+ 
         epoch_time = 0
         epoch_reward = 0
         
@@ -670,11 +672,11 @@ if __name__ == '__main__':
     directory = '../Tests/SATLIB_20/'
     files = os.listdir(directory)
     shuffle(files) # Shuffles in-place
-    filepaths = map(lambda x: os.path.join(directory, x), files)
+    filepaths = list(map(lambda x: os.path.join(directory, x), files))
 
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        time_taken, rewards_received = actor_critic(filepaths, 10, numVars, policy_estimator, value_estimator)
+        time_taken, rewards_received = actor_critic(filepaths, 100, numVars, policy_estimator, value_estimator)
     
 with open('ac_metrics.pickle', 'wb') as fout:
     pickle.dump((time_taken, rewards_received), fout)
