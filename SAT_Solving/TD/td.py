@@ -9,6 +9,8 @@ import pickle
 import time
 
 from random import shuffle
+from itertools import combinations
+from scipy.special import comb
 
 switch_literal = lambda x: x[1:] if x.startswith('-') else '-'+x
 deepcopy = lambda x: pickle.loads(pickle.dumps(x))
@@ -382,6 +384,20 @@ def horn_clause_ratio(clauseNum_clause):
 
     return horn_count / total_count if total_count > 0 else 0
 
+def horn_clause_count(literal_clauseNum, clauseNum_clause):
+    """
+    For each variable, we count the number of Horn clauses it is present in
+    """
+    literal_count = defaultdict(int)
+    for literal, clauseNums in literal_clauseNum.items():
+        for clauseNum in clauseNums:
+            clause = clauseNum_clause[clauseNum]
+            if len(list(filter(lambda x: not x.startswith('-'), clause))) == 1:
+                literal_count[literal] += 1
+                
+    counts = list(literal_count.values())
+    return np.array(counts) if len(counts) > 0 else np.array([0])
+
 
 def clause_to_variable_ratio(literal_clauseNum):
     """ Returns the clause to variable ratio: c/v which predict problem hardness """
@@ -397,6 +413,70 @@ def clause_to_variable_ratio(literal_clauseNum):
 
     return 0 if num_literals == 0 else len(clauses) / num_literals
 
+def pos_neg_ratio(literal_clauseNum):
+    """
+    Returns the number of positive literals (incl repeats) to negative literals (incl repeats) in the clauses.
+    THIS DOESN'T GIVE USEFUL STATE INFORMATION WHEN USED ALONE
+    """
+    pos_literal_count = 0
+    neg_literal_count = 0
+
+    for literal, clauseNums in literal_clauseNum.items():
+        if literal.startswith('-'):
+            neg_literal_count += len(clauseNums)
+        else:
+            pos_literal_count += len(clauseNums)
+
+    return pos_literal_count / neg_literal_count if neg_literal_count > 0 else pos_literal_count
+
+
+def CVIG(literal_clauseNum, clauseNum_clause):
+    """
+    Caluse-variable incidence graph. We create a bipartite graph (a matrix) with literals in columns and clauses in rows.
+    See Features_2 PDF file.
+    """
+    if len(clauseNum_clause) == 0:
+        return 0
+    
+    literal_index_mapping = {}
+    clauseNum_index_mapping = {}
+    
+    for i, literal in enumerate(literal_clauseNum.keys()):
+        literal_index_mapping[literal] = i
+        
+    for i, clauseNum in enumerate(clauseNum_clause):
+        clauseNum_index_mapping[clauseNum] = i
+    
+    graph = np.zeros((len(literal_index_mapping), len(clauseNum_index_mapping)))
+    for literal, clauseNums in literal_clauseNum.items():
+        for clauseNum in clauseNums:
+            graph[literal_index_mapping[literal]] [clauseNum_index_mapping[clauseNum]] = 1/len(clauseNums)
+    
+    return graph
+
+def VIG(literal_clauseNum, clauseNum_clause):
+    """
+    Variable incidence graph.
+    """
+    if len(clauseNum_clause) == 0:
+        return 0
+    
+    literal_index_mapping = {}
+    
+    for i, literal in enumerate(literal_clauseNum.keys()):
+        literal_index_mapping[literal] = i
+        
+    graph = np.zeros((len(literal_index_mapping), len(literal_index_mapping)))
+    
+    for clause in clauseNum_clause.values():
+        if len(clause) < 2:
+            continue
+        for x, y in combinations(clause, 2):
+            w = 1 / (comb(len(clause), 2))  # Try combinations with replacement to add self-loops
+            graph[literal_index_mapping[x]][literal_index_mapping[y]] = w
+            graph[literal_index_mapping[y]][literal_index_mapping[x]] = w
+            
+    return graph
 
 class Env:
     
@@ -405,6 +485,7 @@ class Env:
         self.stack = [] # We use a stack to hold the next states to explore. i.e. we do DFS as less memory requirements than BFS
         self.state = None
         self.actions = {0: 'maxo', 1: 'moms', 2: 'mams', 3: 'jw', 4: 'jw_2', 5: 'bohm'}
+        self.action_penalty = {0: 0, 1: 0, 2: 0, 3: 0, 4: -1, 5: -1}  # Penalty to give each action
     
     def reset(self):
         # Returns state
@@ -416,8 +497,21 @@ class Env:
         literal_clauseNum, clauseNum_clause, literal_boolen = self.state
         num_var = number_of_variables(literal_clauseNum)
         horn_clause = horn_clause_ratio(clauseNum_clause)
+        # var_horn_counts = horn_clause_count(literal_clauseNum, clauseNum_clause)
+        # var_horn_mean, var_horn_var = np.mean(var_horn_counts), np.var(var_horn_counts)
+        
+        # pn_ratio = pos_neg_ratio(literal_clauseNum)
         c_v_ratio = clause_to_variable_ratio(literal_clauseNum)
-        return [num_var, horn_clause, c_v_ratio]
+        
+        cvig_graph = CVIG(literal_clauseNum, clauseNum_clause)
+        cvig_mean, cvig_var = np.mean(cvig_graph), np.var(cvig_graph)  # axis=0 gives more different results if we want this to return vector
+        
+        vig_graph = VIG(literal_clauseNum, clauseNum_clause)
+        vig_mean, vig_var = np.mean(vig_graph), np.var(vig_graph)
+        
+        return [num_var, horn_clause, c_v_ratio, cvig_mean, cvig_var, vig_mean, vig_var]
+        # return [num_var, horn_clause, var_horn_mean, var_horn_var, pn_ratio, c_v_ratio, cvig_mean, cvig_var, vig_mean, vig_var]
+    
     
     def step(self, action):
         """
@@ -436,17 +530,17 @@ class Env:
             isEmpty = len(self.stack) == 0
             if not isEmpty:
                 self.state = self.stack.pop()
-            return 0, -1, isEmpty
+            return None, 1 + self.action_penalty[action], isEmpty
         
         if clauseNum_clause == {}:
-            return 0, 0, True
+            return None, 1 + self.action_penalty[action], True
         
         # Do pure literal elimination
         literal_clauseNum, clauseNum_clause, literal_boolen = \
             pure_literal(literal_clauseNum, clauseNum_clause, literal_boolen)
             
         if clauseNum_clause == {}:
-            return 0, 0, True
+            return None, 1 + self.action_penalty[action], True
         
         literal = choose_var(literal_clauseNum, clauseNum_clause, literal_boolen, algo=self.actions[action])
         
@@ -507,7 +601,7 @@ class Env:
         self.stack.append((literal_clauseNum_F, clauseNum_clause_F, literal_boolen_F))
         
         # return get_state_representation(literal_clauseNum_T), get_state_representation(literal_clauseNum_F), -1, False
-        return None, -1, False
+        return None, -1 + self.action_penalty[action], False
         # Using unassigned_nodes_start - unassigned_nodes_end as cost has been > 0 in testing
         
 from sklearn.linear_model import SGDRegressor
@@ -716,17 +810,17 @@ if __name__ == '__main__':
     use_poly = False  # Set this to True if you want the Estimator to change state to a polynomial. State must be a single number.
     poly_degree = 7   # Degree of polynomial is use_poly is set to True
     actions = 6       # Number of actions available to use by the agent
-    state_space = 3   # Number of variables we return as state of environment. Used to initialise Scaler and SGD in Estimator
+    state_space = 7   # Number of variables we return as state of environment. Used to initialise Scaler and SGD in Estimator
 
-    directory = '../Tests/CNFGEN_20/'  # RLSAT problems are very simple. SATLIB probelms give more interesting Q-values.
+    directory = '../Tests/SATLIB_50/'  # RLSAT problems are very simple. SATLIB probelms give more interesting Q-values.
     files = os.listdir(directory)
     files = list(map(lambda x: os.path.join(directory, x), files))
     shuffle(files)
 
-    split = int(len(files) * 0.01)
+    split = int(len(files) * 0.8)
     training_files = files[:split]
-    test_files = files[split:split+int(len(files) * 0.01)]
-    # test_files = files[split:]
+    # test_files = files[split:split+int(len(files) * 0.01)]
+    test_files = files[split:]
 
     # directory = '../Tests/SATLIB_20/'  # RLSAT problems are very simple. SATLIB probelms give more interesting Q-values.
     # files = os.listdir(directory)
@@ -737,7 +831,7 @@ if __name__ == '__main__':
     print("Number of training files:", len(training_files))
     print("Number of test files:", len(test_files))
 
-    episode_reward_train, episode_length_train, estimator = train(training_files, epochs=100, ϵ=0.1)
+    episode_reward_train, episode_length_train, estimator = train(training_files, epochs=30, ϵ=0.1)
     print("Done training")
     print()
 
@@ -748,5 +842,5 @@ if __name__ == '__main__':
     episode_reward_rand, episode_length_rand = test(test_files, epochs=2)
     print("Done testing random policy")
     
-    with open('SATLIB_50.pickle', 'wb') as fout:
+    with open('SATLIB_50_action_penalty.pickle', 'wb') as fout:
         pickle.dump((episode_reward_train, episode_length_train, estimator, episode_reward_test, episode_length_test, episode_reward_rand, episode_length_rand), fout)
