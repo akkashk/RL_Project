@@ -502,17 +502,16 @@ class Env:
 #         var_horn_mean, var_horn_var = np.mean(var_horn_counts), np.var(var_horn_counts)
         
 #         pn_ratio = pos_neg_ratio(literal_clauseNum)
-#         c_v_ratio = clause_to_variable_ratio(literal_clauseNum)
+        c_v_ratio = clause_to_variable_ratio(literal_clauseNum)
         
-#         cvig_graph = CVIG(literal_clauseNum, clauseNum_clause)
-#         cvig_mean, cvig_var = np.mean(cvig_graph), np.var(cvig_graph)  # axis=0 gives more different results if we want this to return vector
+        cvig_graph = CVIG(literal_clauseNum, clauseNum_clause)
+        cvig_mean, cvig_var = np.mean(cvig_graph), np.var(cvig_graph)  # axis=0 gives more different results if we want this to return vector
         
 #         vig_graph = VIG(literal_clauseNum, clauseNum_clause)
 #         vig_mean, vig_var = np.mean(vig_graph), np.var(vig_graph)
         
-#         return [num_var, c_v_ratio, cvig_mean, cvig_var]
+        return [num_var, c_v_ratio, cvig_mean, cvig_var]
 #         return [num_var, horn_clause, var_horn_mean, var_horn_var, pn_ratio, c_v_ratio, cvig_mean, cvig_var, vig_mean, vig_var]
-        return num_var
     
     def step(self, action):
         """
@@ -831,6 +830,7 @@ def train(training_files, epochs, ϵ, epsilon_decay=0.97):
             curr_epoch_length += episode_length
             curr_epoch_loss += loss
             
+            
         epoch_reward.append(curr_epoch_reward / 1000)
         epoch_length.append(curr_epoch_length / 1000)
         losses.append(curr_epoch_loss / 1000)
@@ -896,10 +896,10 @@ def test(test_files, ϵ=1.1, estimator=None):
 
 
 if __name__ == '__main__':
-    use_poly = True  # Set this to True if you want the Estimator to change state to a polynomial. State must be a single number.
+    use_poly = False  # Set this to True if you want the Estimator to change state to a polynomial. State must be a single number.
     poly_degree = 7   # Degree of polynomial is use_poly is set to True
     actions = 6       # Number of actions available to use by the agent
-    state_space = 1   # Number of variables we return as state of environment. Used to initialise Scaler and SGD in Estimator
+    state_space = 4   # Number of variables we return as state of environment. Used to initialise Scaler and SGD in Estimator
 
     directory = '../Tests/CNFGEN_50/'  # RLSAT problems are very simple. SATLIB probelms give more interesting Q-values.
     files = os.listdir(directory)
@@ -925,5 +925,5 @@ if __name__ == '__main__':
     episode_reward_rand, episode_length_rand, episode_actions_rand = test(test_files)
     print("Done testing random policy")
     
-    with open('CNFGEN_50_poly.pickle', 'wb') as fout:
+    with open('CNFGEN_50_newStates.pickle', 'wb') as fout:
         pickle.dump((episode_reward_train, episode_length_train, estimator, episode_reward_test, episode_length_test, episode_actions, episode_reward_rand, episode_length_rand, episode_actions_rand), fout)
