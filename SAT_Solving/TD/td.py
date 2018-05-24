@@ -15,6 +15,9 @@ from scipy.special import comb
 switch_literal = lambda x: x[1:] if x.startswith('-') else '-'+x
 deepcopy = lambda x: pickle.loads(pickle.dumps(x))
 
+switch_literal = lambda x: x[1:] if x.startswith('-') else '-'+x
+deepcopy = lambda x: pickle.loads(pickle.dumps(x))
+
 def parse_input(input_file):
     
     """
@@ -152,6 +155,9 @@ def pure_literal(literal_clauseNum, clauseNum_clause, literal_boolen):
 
 
 def maxo(literal_clauseNum, return_counts=False):
+    """
+    Returns the literal that appears in the most number of clauses
+    """
     literal_count = defaultdict(int)
     for literal, clauseNums in literal_clauseNum.items():
         literal_count[literal] = len(clauseNums)
@@ -168,6 +174,9 @@ def maxo(literal_clauseNum, return_counts=False):
 
 
 def moms(literal_clauseNum, clauseNum_clause, return_counts=False):
+    """
+    Returns the literal that appears most in the smallest clauses
+    """
     # Select the clausesNumbers for clauses of the smaller size
     least_size = min(map(len, clauseNum_clause.values()))
     literal_count = defaultdict(int)
@@ -192,6 +201,9 @@ def moms(literal_clauseNum, clauseNum_clause, return_counts=False):
 
 
 def mams(literal_clauseNum, clauseNum_clause):
+    """
+    Combines MAXO and MOMS count statistics from above and chooses the literal that appears most between them
+    """
     maxo_ans = maxo(literal_clauseNum, return_counts=True)
     moms_ans = moms(literal_clauseNum, clauseNum_clause, return_counts=True)
     
@@ -211,6 +223,9 @@ def mams(literal_clauseNum, clauseNum_clause):
 
 
 def jw(literal_clauseNum, clauseNum_clause):
+    """
+    Jeroslow-Wang Rule
+    """
     literal_score = defaultdict(int)
     
     for literal, clauseNums in literal_clauseNum.items():
@@ -226,44 +241,6 @@ def jw(literal_clauseNum, clauseNum_clause):
             max_lit = literal
             
     return max_lit, max_score
-
-def set_var(literal, boolean, literal_clauseNum, clauseNum_clause, literal_boolen):
-    literal_boolen[literal] = boolean
-
-    if boolean == False:
-        literal = switch_literal(literal)
-        literal_boolen[literal] = True
-    
-    # Unit-prop logic below
-    pairs_to_delete = []
-    for clauseNums_with_literal in literal_clauseNum[literal]:
-        for literals_in_clauseNums in clauseNum_clause[clauseNums_with_literal]:
-            pairs_to_delete.append((literals_in_clauseNums, clauseNums_with_literal))
-
-    #         print(pairs_to_delete)
-
-    for literals_in_clauseNums, clauseNums_with_literal in pairs_to_delete:
-        literal_clauseNum[literals_in_clauseNums].discard(clauseNums_with_literal)
-        if clauseNums_with_literal in clauseNum_clause:
-            del clauseNum_clause[clauseNums_with_literal]
-
-    # For all the clauses with opposite literal, remove the literal from the clause
-    if switch_literal(literal) not in literal_clauseNum: # if the opposite variable doesn't exist, skip
-        return literal_clauseNum, clauseNum_clause, literal_boolen
-
-    opposite_literal = switch_literal(literal)
-    literal_boolen[opposite_literal] = False
-
-    for clauseNums_with_literal in literal_clauseNum[opposite_literal]:
-        clauseNum_clause[clauseNums_with_literal].discard(opposite_literal)
-
-    literal_clauseNum[opposite_literal] = set()  # It is not watching any clauses anymore
-
-    #         print("OPPO")
-    #         print(literal_clauseNum)
-    #         print(clauseNum_clause)
-    
-    return literal_clauseNum, clauseNum_clause, literal_boolen
 
 def jw_2(literal_clauseNum, clauseNum_clause):
     """
@@ -342,7 +319,45 @@ def bohm(literal_clauseNum, clauseNum_clause):
         literal = neg_literal
     
     return literal, score_vector
+    
 
+def set_var(literal, boolean, literal_clauseNum, clauseNum_clause, literal_boolen):
+    literal_boolen[literal] = boolean
+
+    if boolean == False:
+        literal = switch_literal(literal)
+        literal_boolen[literal] = True
+    
+    # Unit-prop logic below
+    pairs_to_delete = []
+    for clauseNums_with_literal in literal_clauseNum[literal]:
+        for literals_in_clauseNums in clauseNum_clause[clauseNums_with_literal]:
+            pairs_to_delete.append((literals_in_clauseNums, clauseNums_with_literal))
+
+    #         print(pairs_to_delete)
+
+    for literals_in_clauseNums, clauseNums_with_literal in pairs_to_delete:
+        literal_clauseNum[literals_in_clauseNums].discard(clauseNums_with_literal)
+        if clauseNums_with_literal in clauseNum_clause:
+            del clauseNum_clause[clauseNums_with_literal]
+
+    # For all the clauses with opposite literal, remove the literal from the clause
+    if switch_literal(literal) not in literal_clauseNum: # if the opposite variable doesn't exist, skip
+        return literal_clauseNum, clauseNum_clause, literal_boolen
+
+    opposite_literal = switch_literal(literal)
+    literal_boolen[opposite_literal] = False
+
+    for clauseNums_with_literal in literal_clauseNum[opposite_literal]:
+        clauseNum_clause[clauseNums_with_literal].discard(opposite_literal)
+
+    literal_clauseNum[opposite_literal] = set()  # It is not watching any clauses anymore
+
+    #         print("OPPO")
+    #         print(literal_clauseNum)
+    #         print(clauseNum_clause)
+    
+    return literal_clauseNum, clauseNum_clause, literal_boolen
 
 def choose_var(literal_clauseNum, clauseNum_clause, literal_boolen, algo='maxo'):
     # Choosing the first literal every time
@@ -363,6 +378,7 @@ def choose_var(literal_clauseNum, clauseNum_clause, literal_boolen, algo='maxo')
         literal, _ = jw_2(literal_clauseNum, clauseNum_clause)
     elif algo == 'bohm':
         literal, _ = bohm(literal_clauseNum, clauseNum_clause)
+    
 
     return literal
 
@@ -485,7 +501,7 @@ class Env:
         self.stack = [] # We use a stack to hold the next states to explore. i.e. we do DFS as less memory requirements than BFS
         self.state = None
         self.actions = {0: 'maxo', 1: 'moms', 2: 'mams', 3: 'jw', 4: 'jw_2', 5: 'bohm'}
-        self.action_penalty = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}  # Penalty to give each action
+        self.action_penalty = {0: 0, 1: -0.1, 2: -0.1, 3: -0.1, 4: -0.5, 5: -0.5}  # Penalty to give each action
     
     def reset(self):
         # Returns state
@@ -497,22 +513,23 @@ class Env:
         literal_clauseNum, clauseNum_clause, literal_boolen = self.state
         
         num_var = number_of_variables(literal_clauseNum)
-#         horn_clause = horn_clause_ratio(clauseNum_clause)
+        horn_clause = horn_clause_ratio(clauseNum_clause)
+
 #         var_horn_counts = horn_clause_count(literal_clauseNum, clauseNum_clause)
-#         var_horn_mean, var_horn_var = np.mean(var_horn_counts), np.var(var_horn_counts)
+#         var_horn_mean, var_horn_var = np.mean(var_horn_counts), np.var(var_horn_counts)  # DON'T USE
         
-#         pn_ratio = pos_neg_ratio(literal_clauseNum)
+        pn_ratio = pos_neg_ratio(literal_clauseNum)
 #         c_v_ratio = clause_to_variable_ratio(literal_clauseNum)
         
-#         cvig_graph = CVIG(literal_clauseNum, clauseNum_clause)
-#         cvig_mean, cvig_var = np.mean(cvig_graph), np.var(cvig_graph)  # axis=0 gives more different results if we want this to return vector
+        cvig_graph = CVIG(literal_clauseNum, clauseNum_clause)
+        cvig_mean, cvig_var = np.mean(cvig_graph), np.var(cvig_graph)  # axis=0 gives more different results if we want this to return vector
         
 #         vig_graph = VIG(literal_clauseNum, clauseNum_clause)
 #         vig_mean, vig_var = np.mean(vig_graph), np.var(vig_graph)
         
 #         return [num_var, c_v_ratio, cvig_mean, cvig_var]
-#         return [num_var, horn_clause, var_horn_mean, var_horn_var, pn_ratio, c_v_ratio, cvig_mean, cvig_var, vig_mean, vig_var]
-        return num_var
+        return [num_var, horn_clause, pn_ratio, cvig_var]
+#         return num_var
     
     def step(self, action):
         """
@@ -525,13 +542,36 @@ class Env:
         for clause in clauseNum_clause.values():
             if len(clause) > 0:
                 num_clauses_start += 1
-                
-        if num_clauses_start > 0:
-            fraction_of_clauses_removed = num_clauses_start/num_clauses_start
-        else:
-            fraction_of_clauses_removed = 0
+            else:
+                # This is reached when we reached an UNSAT state in previous step and popped off another UNSAT from the stack
+                isEmpty = len(self.stack) == 0
+                if not isEmpty:
+                    self.state = self.stack.pop()
+                return None, -1 + self.action_penalty[action], isEmpty
         
-        unassigned_nodes_start = len(list(filter(lambda x: len(x) > 0, literal_clauseNum.values())))
+        literal = choose_var(literal_clauseNum, clauseNum_clause, literal_boolen, algo=self.actions[action])
+        
+        # Set the chosen literal to be True
+        literal_clauseNum_T, clauseNum_clause_T, literal_boolen_T = \
+            set_var(literal, True, deepcopy(literal_clauseNum), deepcopy(clauseNum_clause), dict(literal_boolen))
+            
+        # Set new state
+        self.state = (literal_clauseNum_T, clauseNum_clause_T, literal_boolen_T)
+        
+        # Set the chosen literal to be False
+        literal_clauseNum_F, clauseNum_clause_F, literal_boolen_F = \
+            set_var(literal, False, literal_clauseNum, clauseNum_clause, literal_boolen)
+            
+        # Add new state to queue
+        self.stack.append((literal_clauseNum_F, clauseNum_clause_F, literal_boolen_F))
+        
+        
+        if clauseNum_clause_T == {} or clauseNum_clause_F == {}:  # We have satisfied
+#             print("INITIAL")
+            return None, 1 + self.action_penalty[action], True
+        
+        
+        literal_clauseNum, clauseNum_clause, literal_boolen = self.state
         
         # Do unit prop
         empty_clause, literal_clauseNum, clauseNum_clause, literal_boolen = \
@@ -541,79 +581,20 @@ class Env:
             isEmpty = len(self.stack) == 0
             if not isEmpty:
                 self.state = self.stack.pop()
-            # return None, -1 + self.action_penalty[action] + fraction_of_clauses_removed, isEmpty
             return None, -1 + self.action_penalty[action], isEmpty
         
         if clauseNum_clause == {}:
-            # return None, 1 + self.action_penalty[action] + fraction_of_clauses_removed, True
+#             print("UNIT PROP")
             return None, 1 + self.action_penalty[action], True
         
         # Do pure literal elimination
         literal_clauseNum, clauseNum_clause, literal_boolen = \
             pure_literal(literal_clauseNum, clauseNum_clause, literal_boolen)
             
+            
         if clauseNum_clause == {}:
-            # return None, 1 + self.action_penalty[action] + fraction_of_clauses_removed, True
+#             print("PLE")
             return None, 1 + self.action_penalty[action], True
-        
-        literal = choose_var(literal_clauseNum, clauseNum_clause, literal_boolen, algo=self.actions[action])
-        
-        
-        # Set the chosen literal to be True
-        literal_clauseNum_T, clauseNum_clause_T, literal_boolen_T = \
-            set_var(literal, True, deepcopy(literal_clauseNum), deepcopy(clauseNum_clause), dict(literal_boolen))
-            
-#         print("After setting", literal, "to True")
-#         print(literal_clauseNum_T)
-#         print(literal_boolen_T)
-#         print()
-        
-#         unassigned_nodes_T = len(filter(lambda x: len(x) > 0, literal_clauseNum_T.values()))
-        
-#         # Do unit prop and pure literal elimnation and record the number of nodes assigned
-#         empty_clause, literal_clauseNum, clauseNum_clause, literal_boolen = 
-#             unit_prop(literal_clauseNum_T, clauseNum_clause_T, literal_boolen_T)
-        
-#         if empty_clause:
-#             return 0, 0, unassigned_nodes_start, self.q.empty()
-        
-#         # Do pure literal elimination
-#         literal_clauseNum, clauseNum_clause, literal_boolen = 
-#             pure_literal(literal_clauseNum, clauseNum_clause, literal_boolen)
-            
-#         if clauseNum_clause == {}:
-#             return 0, 0, unassigned_nodes_start, True
-        
-        # Set new state
-        self.state = (literal_clauseNum_T, clauseNum_clause_T, literal_boolen_T)
-        
-        # Set the chosen literal to be False
-        literal_clauseNum_F, clauseNum_clause_F, literal_boolen_F = \
-            set_var(literal, False, literal_clauseNum, clauseNum_clause, literal_boolen)
-            
-#         print("After setting", literal, "to False")
-#         print(literal_clauseNum_F)
-#         print(literal_boolen_F)
-#         print()
-            
-#         unassigned_nodes_F = len(filter(lambda x: len(x) > 0, literal_clauseNum_F.values()))
-            
-#         # Do unit prop and pure literal elimnation and record the number of nodes assigned
-#         empty_clause, literal_clauseNum, clauseNum_clause, literal_boolen = 
-#             unit_prop(literal_clauseNum_F, clauseNum_clause_F, literal_boolen_F)
-        
-#         if empty_clause:
-#             return 0, 0, unassigned_nodes_start, self.q.empty()
-        
-#         # Do pure literal elimination
-#         literal_clauseNum, clauseNum_clause, literal_boolen = 
-#             pure_literal(literal_clauseNum, clauseNum_clause, literal_boolen)
-            
-#         if clauseNum_clause == {}:
-#             return 0, 0, unassigned_nodes_start, True
-
-        # Add new state to queue
-        self.stack.append((literal_clauseNum_F, clauseNum_clause_F, literal_boolen_F))
         
         num_clauses_end = 0
         for clause in clauseNum_clause.values():
@@ -625,65 +606,92 @@ class Env:
         else:
             fraction_of_clauses_removed = 0
         
-        if clauseNum_clause_T == {} or clauseNum_clause_F == {}:  # We have satisfied
-            fraction_of_clauses_removed = 1
-            # return None, 1 + self.action_penalty[action] + fraction_of_clauses_removed, True
-            return None, 1 + self.action_penalty[action], True
-        else:
-            # return None, -1 + self.action_penalty[action] + fraction_of_clauses_removed, False
-            return None, -1 + self.action_penalty[action], False
+        self.state = (literal_clauseNum, clauseNum_clause, literal_boolen)
+                
+        return None, -1 + self.action_penalty[action] + fraction_of_clauses_removed, False
         
-from sklearn.linear_model import SGDRegressor
+import tensorflow as tf
+from keras.layers import Input, Dense, LeakyReLU, BatchNormalization
+from keras.models import Model
+from keras.optimizers import Adam
+import keras.backend as K
+
 from sklearn.preprocessing import StandardScaler
 
 class Estimator():
     
     def __init__(self):
-        # We create a separate model for each action in the environment's
-        # action space. Alternatively we could somehow encode the action
-        # into the features, but this way it's easier to code up.
-        self.models = []
-        for _ in range(actions):
-            model = SGDRegressor(learning_rate="constant", eta0=0.001, penalty='l2')
-            # We need to call partial_fit once to initialize the model
-            # or we get a NotFittedError when trying to make a prediction
-            # This is quite hacky.
-            model.partial_fit([self.featurize_state(np.zeros(state_space))], [0])
-            self.models.append(model)
         self.scaler = StandardScaler()
-        self.scaler.fit([self.featurize_state(np.zeros(state_space))], [np.zeros(state_space)])
+        self.scaler.fit(self.featurize_state([np.zeros(state_space)]), [np.zeros(state_space)])
+        
+        self.create_model()
+        
+        self.model = Model(inputs=self.input, outputs=self.output)
+        self.action_index = K.placeholder(dtype=tf.int32, name='action_index')
+        self.target = K.placeholder(dtype=tf.float32, name='target')
+        
+        self.chosen_action_qval = tf.gather(self.output, self.action_index, axis=1)
+        self.loss = tf.reduce_mean(tf.squared_difference(self.target, self.chosen_action_qval))
+        
+        self.optimiser = tf.train.AdamOptimizer(learning_rate=0.0001)
+        self.train_op = self.optimiser.minimize(self.loss)
+        
     
-    def featurize_state(self, state):
-        # Needs to return a 1D array
+    def create_model(self):
         if use_poly:
-            state = int(state)
-            return np.array([state**i for i in range(1, poly_degree+1)])
+            STATE_SPACE = state_space * poly_degree
+        else:
+            STATE_SPACE = state_space
+        self.input = Input(shape=(STATE_SPACE,))
+        self.h1 = Dense(2, activation=None)(self.input)
+        self.a1 = LeakyReLU()(self.h1)
+        self.norm = BatchNormalization()(self.a1)
+        # self.h2 = Dense(2, activation=None)(self.norm)
+        # self.a2 = LeakyReLU()(self.h2)
+        self.output = Dense(actions, activation=None)(self.norm)
+        
+        
+    def featurize_state(self, state):
+        # State is a batch of states
+        if use_poly:
+            if type(state) is int:
+                return np.array([state**i for i in range(1, poly_degree+1)])
+            else:
+                poly_batch = []
+                for s in state:
+                    s = int(s)
+                    poly_batch.append([s**i for i in range(1, poly_degree+1)])
+                return np.array(poly_batch)
         else:
             return np.array(state)
     
     def predict(self, state):
-        state_feature = self.featurize_state(state)
-        
-        if len(state_feature.shape) < 2:
-            state_feature = np.expand_dims(state_feature, 0)
-        
-        state_feature = self.scaler.transform(state_feature) # Returns a 2D array
-        return np.array([m.predict(state_feature)[0] for m in self.models])
+        state = self.featurize_state(state)
+        if len(self.input.shape) != len(state.shape):
+            state = np.expand_dims(state, 0)
+        state = self.scaler.transform(state)
+        return np.squeeze(self.model.predict(state))
     
-    def update(self, state, action, reward):
-        model = self.models[action]
-        state_feature = self.featurize_state(state)
+    def update(self, state, action_index, target):
+        """ action: action_index of the literal we chose """
+        state = self.featurize_state(state)
+        action_index = np.array(action_index)
+        target = np.array(target)
         
-        if len(state_feature.shape) < 2:
-            state_feature = np.expand_dims(state_feature, 0)
-        
-        self.scaler.partial_fit(state_feature)
-        state_feature = self.scaler.transform(state_feature) # Returns a 2D array
-        model.partial_fit(state_feature, [reward])
-        
-        return 0
-        
-#         print("After update:", model.predict(state_feature)[0])
+        sess = tf.get_default_session()
+        if len(self.input.shape) != len(state.shape):
+            state = np.expand_dims(state, 0)
+        if len(action_index.shape) != 2:
+            action_index = np.expand_dims(action_index, 0)
+        if len(target.shape) != 2:
+            target = np.expand_dims(target, 0)
+            
+        self.scaler.partial_fit(state)
+        state = self.scaler.transform(state)
+            
+        _, loss = sess.run([self.train_op, self.loss], feed_dict={self.input: state, self.action_index: action_index, 
+                                                                  self.target: target, K.learning_phase(): 1})
+        return loss
 
 
 def make_epsilon_greedy_policy(estimator, epsilon, nA):
@@ -713,142 +721,142 @@ def make_epsilon_greedy_policy(estimator, epsilon, nA):
     return policy_fn
 
 
-def q_learning(env, estimator, discount_factor=1.0, epsilon=0.1, epsilon_decay=1.0, train_phase=True):
-    """
-    Goes through the environment only once (stops when we reach a finishing state in the environment)
-    """
-    episode_length = 0
-    episode_reward = 0
-    loss = 0
+import random
+
+def copy_params(copy_from_est, copy_to_est):
+    copy_to_est.model.set_weights(copy_from_est.model.get_weights())
     
-#     policy = make_epsilon_greedy_policy(estimator, epsilon * epsilon_decay**i_episode, actions)
-#     Since we do not iterate over in q_learning, we do not have i_episode above. See if that is useful here and below (near end)
-    policy = make_epsilon_greedy_policy(estimator, epsilon*epsilon_decay, actions)
 
-    state = env.reset()
-
-    while True:
-        action_prob = policy(state)
-        action = np.random.choice(np.arange(len(action_prob)), p=action_prob)
-#         action = 5
-        _, reward, done = env.step(action)
+def DQN(training_files, batch_size=128, discount_factor=1.0, epsilon=0.4, epsilon_decay=0.965):
+    
+    q_estimator = Estimator()
+    target_estimator = Estimator()
+    
+    replay_memory = []
+    rewards_every_1000 = []
+    length_every_1000 = []
+    loss_every_1000 = []
+    
+    # The policy we're following
+    policy = make_epsilon_greedy_policy(q_estimator, epsilon, actions)
+    
+    print("Starting populating memory")
+    # Populate memory
+    for i, filepath in enumerate(training_files[:1000]):
         
-        # Stats
-        episode_length += 1
-        episode_reward += reward
-
+        if i % 100 == 0:
+            print('Populating', i)
+        
+        env = Env(filepath)
+        state = env.reset()
+        
+        
+        while True:
+            action_probs = policy(state)
+            action =  np.random.choice(np.arange(len(action_probs)), p=action_probs)
+            
+            _, reward, done = env.step(action)
+            next_state = env.get_state()
+            replay_memory.append((state, action, reward, next_state, done))
+            if done:
+                break
+            
+            state = next_state
+            
+            
+    # Make target network predict actual discounter total rewards received using MC method
+    # We know that the memory recorded is sequential. So we have episodic data
+    states_batch, action_batch, targets_batch = [], [], []
+    curr_episode_rewards = []
+    for state, action, reward, next_state, done in replay_memory:
+        states_batch.append(state)
+        action_batch.append(action)
+        curr_episode_rewards.append(reward)
+        
         if done:
-            td_target = reward
-            if train_phase:
-                loss += estimator.update(state, action, td_target)
-            break
-
-        next_state = env.get_state()
-
-        q_values = estimator.predict(next_state)
-        td_target = reward + discount_factor * np.max(q_values)
-        
-        current_value = estimator.predict(state)[action]
-        td_error = td_target - current_value
-        
-        alpha = 0.8
-        update_target = current_value + alpha*td_error
-        if train_phase:
-            loss += estimator.update(state, action, update_target)
-
-        state = next_state
-
-    return episode_reward, episode_length, estimator, loss
-
-
-def q_learning_test(env, estimator, epsilon):
-    episode_length = 0
-    episode_reward = 0
+            # Calculate the targets from the rewards seen in episode
+            ans = list(np.cumsum(curr_episode_rewards[::-1])[::-1])  # Only works since discount factor = 1.0
+            targets_batch.extend(ans)
+            curr_episode_rewards = []
     
-    policy = make_epsilon_greedy_policy(estimator, epsilon, actions)
-
-    state = env.reset()
-
-    while True:
-        action_prob = policy(state)
-        action = np.random.choice(np.arange(len(action_prob)), p=action_prob)
-#         action = 3
-        _, reward, done = env.step(action)
+    loss = 500
+    while loss > 200:
+        states_batch, action_batch, targets_batch = np.array(states_batch), np.array(action_batch), np.array(targets_batch)      
+        # Sample some of the data points. Better than giving it new data every time
+        sample_idx = np.array(random.sample(range(len(states_batch)), batch_size))
+        # print(loss, states_batch[sample_idx[0]], action_batch[sample_idx[0]], targets_batch[sample_idx[0]])
+        loss = target_estimator.update(states_batch[sample_idx], action_batch[sample_idx], targets_batch[sample_idx])
         
-        # Stats
-        episode_length += 1
-        episode_reward += reward
-
-        if done:
-            break
-
-        state = env.get_state()
-
-    return episode_reward, episode_length
-
-def train(training_files, epochs, ϵ, epsilon_decay=0.97):
-    """
-    One episode is one file. Each call to q_learning function does one episode only and returns. 
-    An Env can be instantiated with one file only, so can only do one episode.
-    
-    In one epoch, you go through all the files in your training dataset.
-    """
-    epoch_reward, epoch_length, losses = [], [], []
-    estimator = Estimator()
-    
-    for i in range(epochs):
-    # We iterate over all the files onces and then repeat it. Better than just repeating same file over multiple times
-    # We get knowledge of other files too when re-iterating over already seen files
-    
-        print("Epoch Number:", i+1)
-        curr_epoch_length = 0
-        curr_epoch_reward = 0
-        curr_epoch_loss = 0
-
         
-#         shuffle(training_files)  # Shuffles files in-place
-
-        for j, filepath in enumerate(training_files):
-            """ Each file in one episode """
             
-            if j % 1000 == 0:
-                part = j // 1000
-                print(part)
-                epsilon_decay_j = epsilon_decay**part
-                epoch_reward.append(curr_epoch_reward / 1000)
-                epoch_length.append(curr_epoch_length / 1000)
-                losses.append(curr_epoch_loss / 1000)
+    max_memory = len(replay_memory) * 10
+    print("Memory size:", max_memory)
+    
+    print("Starting training")
+    
+    curr_reward = 0
+    curr_length = 0
+    curr_loss = 0
+    output_stats_every = 1000
+    
+    for i, filepath in enumerate(training_files[1000:]):
+        
+        env = Env(filepath)
+        state = env.reset()
+        
+        if i % output_stats_every == 0:
+            # print(i, curr_reward / output_stats_every, curr_length / output_stats_every, curr_loss / output_stats_every)
+            rewards_every_1000.append(curr_reward / output_stats_every)
+            length_every_1000.append(curr_length / output_stats_every)
+            loss_every_1000.append(curr_loss / output_stats_every)
+            
+            curr_reward = 0
+            curr_length = 0
+            curr_loss = 0
+            
+            # Copy model parameters over
+            copy_params(q_estimator, target_estimator)
+            
+            # Make new policy
+            part = i // output_stats_every
+            print("New epsilon:", epsilon*(epsilon_decay**part))
+            policy = make_epsilon_greedy_policy(q_estimator, epsilon*(epsilon_decay**part), actions)
+        
+        
+        while True:
+            action_probs = policy(state)
+            action =  np.random.choice(np.arange(len(action_probs)), p=action_probs)
+            
+            _, reward, done = env.step(action)
+            
+            next_state = env.get_state()
+            replay_memory.append((state, action, reward, next_state, done))
+            if len(replay_memory) > max_memory:
+                replay_memory.pop(0)
                 
+            # Update stats
+            curr_reward += reward
+            curr_length += 1
+            
+            if done:
+                break
                 
-                curr_epoch_length = 0
-                curr_epoch_reward = 0
-                curr_epoch_loss = 0
-                
-            env = Env(filepath)
-            episode_reward, episode_length, estimator, loss = q_learning(env, estimator, epsilon=ϵ, epsilon_decay=epsilon_decay_j)
-            
-            curr_epoch_reward += episode_reward
-            curr_epoch_length += episode_length
-            curr_epoch_loss += loss
-            
-        epoch_reward.append(curr_epoch_reward / 1000)
-        epoch_length.append(curr_epoch_length / 1000)
-        losses.append(curr_epoch_loss / 1000)
-            
-        # Average reward per episode in this epoch
-#         epoch_reward.append(curr_epoch_reward / len(training_files))
-
-        # Average length of each episode in this epoch
-#         epoch_length.append(curr_epoch_length / len(training_files))
+            state = next_state
         
-        # Average loss of each episode in this epoch
-#         losses.append(curr_epoch_loss / len(training_files))
+        # Sample a minibatch from the replay memory
+        samples = random.sample(replay_memory, batch_size)
+        states_batch, action_batch, reward_batch, next_states_batch, done_batch = map(np.array, zip(*samples))
         
-#         print("Reward:", epoch_reward[-1])
-#         print("Length:", epoch_length[-1])
-#         print("Loss:", losses[-1])
-            
-    return epoch_reward, epoch_length, estimator, losses
+        # Calculate q values and targets
+        q_values_next = target_estimator.predict(next_states_batch)
+        targets_batch = reward_batch + np.invert(done_batch).astype(np.float32) * discount_factor * np.amax(q_values_next, axis=1)
+        
+        curr_loss += q_estimator.update(states_batch, action_batch, targets_batch)
+        if i % (output_stats_every/10) == 0:
+            print(states_batch[0], action_batch[0], targets_batch[0])
+        
+        
+    return rewards_every_1000, length_every_1000, loss_every_1000, q_estimator
 
 
 def test(test_files, ϵ=1.1, estimator=None):
@@ -866,19 +874,18 @@ def test(test_files, ϵ=1.1, estimator=None):
     total_reward, total_length, total_states, total_actions = 0, 0, [], []
     
     if estimator is None:
-        estimator = Estimator()  # Never used if epsilon > 1 
-    
+        estimator = Estimator()  # Never used if epsilon > 1
+        
     policy = make_epsilon_greedy_policy(estimator, ϵ, actions)
     
+    for i, filepath in enumerate(test_files):
         
-    for filepath in test_files:
         env = Env(filepath)
         state = env.reset()
         
         while True:
-            action_prob = policy(state)
-            action = np.random.choice(np.arange(len(action_prob)), p=action_prob)
-    #         action = 3
+            action_probs = policy(state)
+            action =  np.random.choice(np.arange(len(action_probs)), p=action_probs)
             _, reward, done = env.step(action)
 
             # Stats
@@ -890,23 +897,23 @@ def test(test_files, ϵ=1.1, estimator=None):
                 break
 
             state = env.get_state()
-            
+
     return total_reward/len(test_files), total_length/len(test_files), np.array(total_actions) #, total_states
 
 
 
 if __name__ == '__main__':
-    use_poly = True  # Set this to True if you want the Estimator to change state to a polynomial. State must be a single number.
+    use_poly = False  # Set this to True if you want the Estimator to change state to a polynomial. State must be a single number.
     poly_degree = 7   # Degree of polynomial is use_poly is set to True
     actions = 6       # Number of actions available to use by the agent
-    state_space = 1   # Number of variables we return as state of environment. Used to initialise Scaler and SGD in Estimator
+    state_space = 4   # Number of variables we return as state of environment. Used to initialise Scaler and SGD in Estimator
 
-    directory = '../Tests/CNFGEN_50/'  # RLSAT problems are very simple. SATLIB probelms give more interesting Q-values.
+    directory = '../Tests/CNFGEN_20/'  # RLSAT problems are very simple. SATLIB probelms give more interesting Q-values.
     files = os.listdir(directory)
     files = list(map(lambda x: os.path.join(directory, x), files))
     shuffle(files)
 
-    split = int(len(files) * 0.4)
+    split = int(len(files) * 0.5)
     training_files = files[:split]
     # test_files = files
     test_files = files[60000:61000]
@@ -914,16 +921,20 @@ if __name__ == '__main__':
     print("Number of training files:", len(training_files))
     print("Number of test files:", len(test_files))
 
-    episode_reward_train, episode_length_train, estimator, losses = train(training_files, epochs=1, ϵ=0.4, epsilon_decay=0.965)
-    print("Done training")
-    print()
+    with tf.Session() as sess:
+        episode_reward_train, episode_length_train, losses, estimator = DQN(training_files, epsilon=0.4, epsilon_decay=0.97)
+        print("Done training")
+        print()
 
-    episode_reward_test, episode_length_test, episode_actions = test(test_files, ϵ=0, estimator=estimator)
-    print("Done testing")
-    print()
+        episode_reward_test, episode_length_test, episode_actions = test(test_files, ϵ=0, estimator=estimator)
+        print("Done testing")
+        print()
 
-    episode_reward_rand, episode_length_rand, episode_actions_rand = test(test_files)
-    print("Done testing random policy")
+        episode_reward_rand, episode_length_rand, episode_actions_rand = test(test_files)
+        print("Done testing random policy")
+        
+        for l in estimator.model.layers:
+            print(l.get_weights())
     
-    with open('CNFGEN_50_poly.pickle', 'wb') as fout:
-        pickle.dump((episode_reward_train, episode_length_train, estimator, episode_reward_test, episode_length_test, episode_actions, episode_reward_rand, episode_length_rand, episode_actions_rand), fout)
+    with open('CNFGEN_20_NL_top4_2Norm_allPenalty.pickle', 'wb') as fout:
+        pickle.dump((episode_reward_train, episode_length_train, losses, episode_reward_test, episode_length_test, episode_actions, episode_reward_rand, episode_length_rand, episode_actions_rand), fout)
