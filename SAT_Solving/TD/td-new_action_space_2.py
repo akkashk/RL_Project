@@ -154,6 +154,59 @@ def pure_literal(literal_clauseNum, clauseNum_clause, literal_boolen):
                         
     return literal_clauseNum, clauseNum_clause, literal_boolen
 
+def bohm(literal_clauseNum, clauseNum_clause):
+    """
+    See Heuristics folder. Lexicographic order of the vector (H1(x), H2(x), ..., Hn(x)) means we first choose highest H1(x)
+    variable. When tied we then choose amongst tied variable highest H2 variable. When tied then H3 and so on.
+    
+    We've had to manage edge cases here but don't mention that in report. Only give formula from paper
+    """
+    pos_literal_count = defaultdict(lambda: [0, 0, 0])  # This default initialisation only works for 3 SAT
+    neg_literal_count = defaultdict(lambda: [0, 0, 0])
+    
+    for literal, clauseNums in literal_clauseNum.items():
+        if literal.startswith('-'):
+            for clauseNum in clauseNums:
+                clause = clauseNum_clause[clauseNum]
+                neg_literal_count[literal][len(clause)-1] += 1
+        else:
+            for clauseNum in clauseNums:
+                clause = clauseNum_clause[clauseNum]
+                pos_literal_count[literal][len(clause)-1] += 1
+                
+    final_count = []
+    # Sometimes we only have negative literals left. So then we just use those
+    for literal, pos_counts in (pos_literal_count.items() or neg_literal_count.items()):
+        other_literal = switch_literal(literal)
+        
+        if literal.startswith('-'):
+            # pos_literal_counts is empty. So literal and pos_counts actually are neg_literal_counts
+            neg_counts = pos_literal_count[other_literal]
+        else:
+            # pos_literal_counts isn't empty. So continue as normal
+            neg_counts = neg_literal_count[other_literal]
+        
+        final_count.append(([max(p, n) + 2 * min(p, n) for p, n in zip(pos_counts, neg_counts)], literal))
+            
+    final_count.sort(reverse=True)
+    score_vector, literal = final_count[0]
+    other_literal = switch_literal(literal)
+    
+    if literal.startswith('-'):
+        neg_literal = literal
+        pos_literal = other_literal
+    else:
+        neg_literal = other_literal
+        pos_literal = literal
+    
+    # Since the score for positive and negative literal is the same, choose one which the highest overall score
+    if sum(pos_literal_count[pos_literal]) >= sum(neg_literal_count[neg_literal]):
+        literal = pos_literal
+    else:
+        literal = neg_literal
+    
+    return literal, score_vector
+
 
 def set_var(literal, boolean, literal_clauseNum, clauseNum_clause, literal_boolen):
     literal_boolen[literal] = boolean
@@ -394,56 +447,6 @@ class Env:
         return None, -1 + fraction_of_clauses_removed, False
 
 
-        
-from sklearn.linear_model import SGDRegressor
-from sklearn.preprocessing import StandardScaler
-
-class Estimator():
-    
-    def __init__(self):
-        # We create a separate model for each action in the environment's
-        # action space. Alternatively we could somehow encode the action
-        # into the features, but this way it's easier to code up.
-        self.model = SGDRegressor(learning_rate="constant", eta0=0.001, penalty='l2')
-        self.model.partial_fit([self.featurize_state(np.zeros(state_space))], [0])
-        self.scaler = StandardScaler()
-        self.scaler.fit([self.featurize_state(np.zeros(state_space))], [np.zeros(state_space)])
-    
-    def featurize_state(self, state):
-        # Needs to return a 1D array
-        if use_poly:
-            state = int(state)
-            return np.array([state**i for i in range(1, poly_degree+1)])
-        else:
-            return np.array(state)
-    
-    def predict(self, state):
-        ans = []
-        for lit_state in state:
-            state_feature = self.featurize_state(lit_state)
-            
-            if len(state_feature.shape) < 2:
-                state_feature = np.expand_dims(state_feature, 0)
-            
-            state_feature = self.scaler.transform(state_feature) # Returns a 2D array
-            q_val= self.model.predict(state_feature)[0]
-            ans.append(q_val)
-            
-        return np.array(ans)
-    
-    def update(self, state, action_idx, reward):
-        model = self.model
-        state_feature = self.featurize_state(state[action_idx])
-        
-        if len(state_feature.shape) < 2:
-            state_feature = np.expand_dims(state_feature, 0)
-        
-        self.scaler.partial_fit(state_feature)
-        state_feature = self.scaler.transform(state_feature) # Returns a 2D array
-        model.partial_fit(state_feature, [reward])
-        
-        return 0
-
 def DQN_make_epsilon_greedy_policy(estimator, epsilon, nA):
     """
     Creates an epsilon-greedy policy based on a given Q-function approximator and epsilon.
@@ -473,67 +476,10 @@ def DQN_make_epsilon_greedy_policy(estimator, epsilon, nA):
     return policy_fn
 
 
-def test(test_files, ϵ=1.0, estimator=None):
-    """
-    This method is used to either:
-    
-     - Run a random policy on the test data and returns the avg. reward and length per epoch (epoch runs over the test_files).
-     This can be done by only passing on first two parameters (and optionally epochs for longer runs)
-     
-     - Run an epilon-greedy policy with the given estimator. Pass an estimator that we receive from the train() method and set 
-     the ϵ value appropriately to make an epsilon-greedy policy. Runs this policy over the test_files for given number of epochs.
-    
-    Returns dictionary of {epoch: average reward} and {epoch: average length per episode/file}
-    """
-    total_reward, total_length, total_states, total_actions = 0, 0, [], []
-    
-    if estimator is None:
-        estimator = Estimator()  # Never used if epsilon > 1
-        
-    policy = DQN_make_epsilon_greedy_policy(estimator, ϵ, actions)
-    
-    for i, filepath in enumerate(test_files):
-        
-        if i % 100 == 0:
-            print("Testing file", i)
-        
-        env = Env(filepath)
-        state = env.reset()
-        
-        while True:
-            action_probs = policy(state, env.state[0])
-            action_probs = redistribute_probability(action_probs, env.state[0])
-
-            action_idx =  np.random.choice(np.arange(len(action_probs)), p=action_probs)
-            action = IDX_LIT[action_idx]
-            
-            _, reward, done = env.step(action)
-
-            # Stats
-            total_length += 1
-            total_reward += reward
-            total_actions.append(action_idx)
-
-            if done:
-                break
-
-            state = env.get_state()
-
-    return total_reward/len(test_files), total_length/len(test_files), np.array(total_actions) #, total_states
-    
-    
-
-import random
-
-def copy_params(copy_from_est, copy_to_est):
-    copy_to_est.model.set_weights(copy_from_est.model.get_weights())
-    
-    
 def redistribute_probability(action_prob, literal_clauseNum):
     total_gained = 0
     idx_to_increase = []
     
-#     for literal, clauseNums in literal_clauseNum.items():
     for literal in LIT_IDX:  # If a literal doesn't appear in the formula, then literal_clauseNum won't have it
         clauseNums = literal_clauseNum[literal]
         if len(clauseNums) == 0:
@@ -549,8 +495,99 @@ def redistribute_probability(action_prob, literal_clauseNum):
         action_prob[idx] += per_idx_inc
     return action_prob
 
+def copy_params(copy_from_est, copy_to_est):
+    copy_to_est.model.set_weights(copy_from_est.model.get_weights())
+    
+    
+    
+def test(test_files, ϵ=1.0, estimator=None, num_top_actions=3, use_hybrid=False):
 
-def train(training_files, ϵ, epsilon_decay=0.97, discount_factor=1.0):
+    total_reward, total_length, total_states, total_actions = 0, 0, [], []
+    
+    if estimator is None:
+        estimator = Estimator()  # Never used if epsilon > 1
+        
+    policy = DQN_make_epsilon_greedy_policy(estimator, ϵ, actions)
+    
+    for i, filepath in enumerate(test_files):
+        
+#         if i % 100 == 0:
+#             print("Testing file", i)
+        
+        env = Env(filepath)
+        state = env.reset()
+        
+        while True:
+            literal_clauseNum, clauseNum_clause, _ = env.state
+            
+            action_prob = policy(state, literal_clauseNum)
+            action_prob = redistribute_probability(action_prob, literal_clauseNum)
+            
+            if use_hybrid:
+                # Using Hybrid approach for testing
+                top_action_idx = np.random.choice(np.arange(len(action_prob)), p=action_prob, size=num_top_actions)
+                action_literal_clauseNum = {IDX_LIT[idx]: literal_clauseNum[IDX_LIT[idx]] for idx in top_action_idx}
+                action, _ = bohm(action_literal_clauseNum, clauseNum_clause)
+                action_idx = LIT_IDX[action]
+            else:
+                # Only relying on policy
+                action_idx = np.random.choice(np.arange(len(action_prob)), p=action_prob)
+                action = IDX_LIT[action_idx]
+                
+
+            _, reward, done = env.step(action)
+
+            # Stats
+            total_length += 1
+            total_reward += reward
+            total_actions.append(action_idx)
+
+            if done:
+                break
+
+            state = env.get_state()
+
+    return total_reward/len(test_files), total_length/len(test_files), np.array(total_actions) #, total_states
+
+
+from sklearn.linear_model import SGDRegressor
+from sklearn.preprocessing import StandardScaler
+
+class Estimator():
+    
+    def __init__(self):
+        # We create a separate model for each action in the environment's
+        # action space. Alternatively we could somehow encode the action
+        # into the features, but this way it's easier to code up.
+        self.model = SGDRegressor(learning_rate="constant", eta0=0.001, penalty='l2')
+        self.model.partial_fit([self.featurize_state(np.zeros(state_space))], [0])
+        self.scaler = StandardScaler()
+        self.scaler.fit([self.featurize_state(np.zeros(state_space))], [np.zeros(state_space)])
+    
+    def featurize_state(self, state):
+        # Needs to return a 1D array
+        return np.array(state)
+    
+    def predict(self, state):
+        preds = self.model.predict(state).squeeze()
+        return preds
+        
+    def update(self, state, action_idx, reward):
+        model = self.model
+        state_feature = self.featurize_state(state[action_idx])
+        
+        if len(state_feature.shape) < 2:
+            state_feature = np.expand_dims(state_feature, 0)
+        
+        self.scaler.partial_fit(state_feature)
+        state_feature = self.scaler.transform(state_feature) # Returns a 2D array
+        model.partial_fit(state_feature, [reward])
+        
+        return 0
+    
+    
+
+def train(training_files, epsilon=0.4, epsilon_decay=0.94, discount_factor=1.0, num_top_actions=3, output_stats_every=1000):
     total_reward, total_length = [], []
     
     estimator = Estimator()
@@ -561,28 +598,34 @@ def train(training_files, ϵ, epsilon_decay=0.97, discount_factor=1.0):
     for j, filepath in enumerate(training_files):
         """ Each file in one episode """
         
-        if j % 1000 == 0:
-            part = j // 1000
+        if j % output_stats_every == 0:
+            part = j // output_stats_every
             epsilon_decay_j = epsilon_decay**part
-            total_reward.append(curr_reward / 1000)
-            total_length.append(curr_length / 1000)
-            print(part, total_reward[-1], total_length[-1])
+            total_reward.append(curr_reward / output_stats_every)
+            total_length.append(curr_length / output_stats_every)
+            # print(part, total_reward[-1], total_length[-1])
 
             curr_length = 0
             curr_reward = 0
-            policy = DQN_make_epsilon_greedy_policy(estimator, ϵ*epsilon_decay_j, actions)
+            policy = DQN_make_epsilon_greedy_policy(estimator, epsilon*epsilon_decay_j, actions)
 
         env = Env(filepath)
         state = env.reset()
 
         while True:
-            action_prob = policy(state,  env.state[0])
-            action_prob = redistribute_probability(action_prob, env.state[0])
+            literal_clauseNum, clauseNum_clause, _ = env.state
+            
+            action_prob = policy(state, literal_clauseNum)
+            action_prob = redistribute_probability(action_prob, literal_clauseNum)
+            
+            # Use below for hybrid approach of training with Heuristic
+#             top_action_idx = np.random.choice(np.arange(len(action_prob)), p=action_prob, size=num_top_actions)
+#             action_literal_clauseNum = {IDX_LIT[idx]: literal_clauseNum[IDX_LIT[idx]] for idx in top_action_idx}
+#             action, _ = bohm(action_literal_clauseNum, clauseNum_clause)
+#             action_idx = LIT_IDX[action]
+            
             action_idx = np.random.choice(np.arange(len(action_prob)), p=action_prob)
             action = IDX_LIT[action_idx]
-            
-            if len(env.state[0][action]) == 0:
-                print("INVALID ACTION")
             
             _, reward, done = env.step(action)
 
@@ -599,14 +642,7 @@ def train(training_files, ϵ, epsilon_decay=0.97, discount_factor=1.0):
 
             q_values = estimator.predict(next_state)
             
-            # Make q_values of unusable actions -inf
-            for literal, clauseNums in env.state[0].items():
-                if len(clauseNums) == 0:
-                    idx = LIT_IDX[literal]
-                    q_values[idx] = -np.inf 
-            
             td_target = reward + discount_factor * np.max(q_values)
-
             current_value = estimator.predict(state)[action_idx]
             td_error = td_target - current_value
 
@@ -616,13 +652,13 @@ def train(training_files, ϵ, epsilon_decay=0.97, discount_factor=1.0):
 
             state = next_state
 
-    total_reward.append(curr_reward / 1000)
-    total_length.append(curr_length / 1000)
-    print("Last output:", total_reward[-1], total_length[-1])
+    total_reward.append(curr_reward / output_stats_every)
+    total_length.append(curr_length / output_stats_every)
+    # print("Last output:", total_reward[-1], total_length[-1])
     
-    return total_reward, total_length, estimator
-
-
+    return total_reward, total_length, [], estimator
+    
+        
 if __name__ == '__main__':
     use_poly = False
     poly_degree = 7
@@ -642,46 +678,49 @@ if __name__ == '__main__':
     state_space = 6          # Number of metrics for each literal
 
     directory = '../Tests/CNFGEN_20/'  # RLSAT problems are very simple. SATLIB probelms give more interesting Q-values.
-    files = os.listdir(directory)
-    files = list(map(lambda x: os.path.join(directory, x), files))
+    files = list(map(lambda x: os.path.join(directory, x), os.listdir(directory)))
 
     split = int(len(files) * 0.6)
     training_files = files[:split]
-    # shuffle(training_files)
+    shuffle(training_files)
 
     test_files = files[60000:61000]
     
     ######### ADDING EXTRA TRAINING FILES ##########
-    training_files.append(files[61000:])
+    # training_files.append(files[61000:])
 
-    print("Number of training files:", len(training_files))
-    print("Number of test files:", len(test_files))
+#     print("Number of training files:", len(training_files))
+#     print("Number of test files:", len(test_files))
 
+    print("TESTING LINEAR NEW ACTION SPACE")
 
     s = time.time()
-    episode_reward_train, episode_length_train, estimator = train(training_files, ϵ=0.6, epsilon_decay=0.96)
+    episode_reward_train, episode_length_train, losses, estimator = train(training_files, epsilon=0.8, epsilon_decay=0.94)
     e = time.time()
     print("Done training in", (round(e-s, 2)), "s")
     print()
-    est = estimator
 
-    print("Starting Testing")
+    print("Starting Testing Hybrid of learnt policy")
     s = time.time()
-    episode_reward_test, episode_length_test, episode_actions = test(test_files, ϵ=0, estimator=est)
-    print(episode_reward_test, episode_length_test)
-    print(np.bincount(episode_actions))
+    episode_reward_test_T, episode_length_test_T, episode_actions_T = test(test_files, ϵ=0, estimator=estimator)
     e = time.time()
     print("Done testing in", (round(e-s, 2)), "s")
+    print(episode_reward_test_T, episode_length_test_T)
+    print(np.bincount(episode_actions_T))
     print()
 
-
+    print("Starting Testing Hybrid of random policy")
     s = time.time()
-    episode_reward_rand, episode_length_rand, episode_actions_rand = test(test_files)
+    episode_reward_rand_T, episode_length_rand_T, episode_actions_rand_T = test(test_files)
     e = time.time()
-    print(np.bincount(episode_actions))
-    print(episode_reward_rand, episode_length_rand)
     print("Done testing random policy in ", (round(e-s, 2)), "s")
+    print(episode_reward_rand_T, episode_length_rand_T)
+    print(np.bincount(episode_actions_rand_T))
     print()
+
     
-    with open('CNFGEN_20_99epochs_new_action_Linear.pickle', 'wb') as fout:
-        pickle.dump((episode_reward_train, episode_length_train, episode_reward_test, episode_length_test, episode_actions, episode_reward_rand, episode_length_rand, episode_actions_rand), fout)
+    with open('MultipleRunsMetrics/newActionLinear3.pickle', 'wb') as fout:
+        pickle.dump((episode_reward_train, episode_length_train), fout)
+    
+#     with open('CNFGEN_20_50epochs_Hybrid_Linear.pickle', 'wb') as fout:
+#         pickle.dump((episode_reward_train, episode_length_train, estimator, episode_reward_test_T, episode_length_test_T, episode_actions_T, episode_reward_test_F, episode_length_test_F, episode_actions_F, episode_reward_rand_T, episode_length_rand_T, episode_actions_rand_T, episode_reward_rand_F, episode_length_rand_F, episode_actions_rand_F), fout)
